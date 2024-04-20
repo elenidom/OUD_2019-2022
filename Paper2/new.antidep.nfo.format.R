@@ -276,15 +276,6 @@ master.ddi.antidep_all <- master.ddi.antidep_all %>%
 # remove records whereby tstart and tstop are the same
 master.ddi.antidep_all <- master.ddi.antidep_all %>% filter(tstart != tstop)
 
-#######################################################################
-#                                                                     #
-# If you need to restrict to 1 year fu after the completion of the    #
-# last OST episode,                                                   #
-# GO TO FILE "SENSITIVITY/1year.R" and run that code and return here. #                                                  #
-#                                                                     #
-#######################################################################
-
-
 
 # ----------------------------------------------------------------------------------------
 # All the data (antidep on/off and NFO yes/no) -*** CRUDE RATES / RELATIVE ESTIMATES ***-
@@ -322,14 +313,6 @@ master.ddi.antidep_all <- master.ddi.antidep_all %>% group_by(patid) %>%
                         lead(ANTIDEP == 1, default = last(ANTIDEP) == 1), 
                       1, ANTIDEP)
   ) %>% ungroup()
-
-
-# -------------------------------------------------------------------
-# RUN FOR SENSITIVITY ANALYSIS ONLY: 
-# If you need to exclude patids with history of overdose go to file
-# 'No_overdose_history.R'
-# -------------------------------------------------------------------
-
 
 
 # -------------------------------------------------------------------
