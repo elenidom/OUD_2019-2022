@@ -1,0 +1,153 @@
+---
+title: "Aurum_initial_extraction_basic_stats"
+author: "Eleni Domzaridou"
+date: "04/02/2021"
+output:
+  word_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+load("Env_0_initial_extraction.RData")
+library(dplyr)
+library(lubridate)
+library(ggplot2)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+
+### Formulation summary
+
+```{r }
+
+formu_init <- my_patients %>% 
+  group_by(formulation) %>% 
+  summarise(Records=n(), 
+            Patients=n_distinct(patid)) %>% 
+  arrange(-Patients)
+```
+
+```{r results="asis"}
+knitr::kable(formu_init, caption = "Aurum - Formulation summary - initial")
+
+```
+
+### Product names summary excluding transdermal patches and buprenorphine formulations that are usually prescribed for pain management
+
+Exclude transdermal patches and tephine/temgesic/some buprenorphine formulations (200|400microgrm) based on product names because they are prescribed for pain management:
+
+```{r}
+
+# Formulation/Number of records/Number of patids
+
+x <- my_patients %>% summarise(all_patients = n_distinct(patid)) # number of all patients 
+
+formu_before <- my_patients %>% 
+  group_by(formulation, drugsubstancename) %>% 
+  summarise(Records=n(), 
+            Patients=n_distinct(patid),
+            Coh_pat_pers = round(Patients/x$all_patients*100, 2), .groups = 'drop') %>% 
+  arrange(-Patients)
+
+formu_before
+```
+
+```{r results="asis"}
+knitr::kable(formu_before, caption = "Aurum - Formulation summary")
+
+```
+
+# exclude some formulations
+```{r}
+my_patients_tp_excl <- my_patients %>% filter(formulation != "Transdermal patch")
+my_patients_tp_excl %>% count(patid)
+
+# product codes of tephine, temgesic and buprenorphine 200/300/400 microgram
+
+excl_drugs <- c("Tephine", "Temgesic", "Buprenorphine 200micro", "Buprenorphine 300micro", "Buprenorphine 400micro")
+
+my_patients_tp_excl$excl_drugsub <- with(my_patients_tp_excl, 
+                                         grepl(paste(excl_drugs, collapse = "|"), productname, 
+                                              ignore.case = TRUE))
+
+table(my_patients_tp_excl$excl_drugsub)
+
+my_patients_tp_excl <- my_patients_tp_excl %>% filter(excl_drugsub == FALSE)
+my_patients_tp_excl %>% count(patid)
+
+y <- my_patients_tp_excl %>% summarise(all_patients_exc = n_distinct(patid)) # number of patients without
+# transdermal patches or buprenorphine pain formulations
+
+formu_after <- my_patients_tp_excl %>% 
+  group_by(formulation) %>% 
+  summarise(Records=n(), 
+            Patients=n_distinct(patid),
+            Coh_pat_pers = paste0(round(Patients/y$all_patients_exc*100, 2),"%"), .groups = 'drop') %>% 
+  arrange(-Patients)
+
+formu_after
+```
+
+### Print results in table format
+```{r results="asis"}
+knitr::kable(formu_after, caption = "Aurum - Formulation summary - reduced")
+
+```
+### Visualise age categories before and after cleaning
+
+```{r, echo = FALSE}
+
+age.df.all <- my_patients_tp_excl %>% 
+  select(c("patid", "yob", "index_date", "myage", "myage_cat")) %>%
+  distinct()
+
+hist(age.df.all$myage,  
+     xlim = c(0, 120),
+     ylim = c(0, 7000),
+     xlab = "age (years)",
+     main = "Age at index date",
+     breaks = 50,
+     col = "antiquewhite3")
+
+age.df.18_64 <- my_patients_tp_excl %>% 
+  select(c("patid", "yob", "index_date", "myage", "myage_cat")) %>%
+  filter(myage >= 18 & myage <= 64) %>%
+  distinct()
+
+hist(age.df.18_64$myage,  
+     xlim = c(0, 120), 
+     ylim = c(0, 7000),
+     xlab = "age (years)",
+     main = "Age at index date [18-64]",
+     breaks = 50,
+     col = "antiquewhite")
+
+# FILTERING!
+my_patients_tp_excl %>% summarise(n_distinct(patid)) # before age filter
+my_patients_tp_excl <- my_patients_tp_excl %>% filter(myage >= 18 & myage <= 64)
+my_patients_tp_excl %>% summarise(n_distinct(patid))# after age filter
+```
+
+```{r, echo = FALSE}
+
+# freq_years <- my_patients_tp_excl %>% 
+#   select("patid", "index_year") %>% 
+#   distinct(patid, index_year)
+# 
+# gg_index_year <- ggplot(freq_years, aes(index_year), x)+
+#   geom_freqpoly(binwidth = 1) +
+#   labs(title = "New OST prescriptions annually/Aurum")
+# 
+# y_gg_iy <- c(0, 500, 1000, 1500, 2000, 2500, 3000, 3500, 4000)
+# 
+# gg_index_year + scale_x_continuous(name = "Index year")+
+#                 scale_y_continuous(name = "Number of patients", breaks = y_gg_iy)
+#  ggsave(filename = "aurum_index_year.jpg", plot=last_plot())
+
+
+
+```
