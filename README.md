@@ -1,4 +1,4 @@
-This repository includes code for the following articles:
+This repository includes samples of code for the following articles:
 
 Domzaridou E, Carr MJ, Webb RT, Millar T, Ashcroft DM. Non-fatal overdose risk during and after opioid agonist treatment: A primary care cohort study with linked hospitalisation and mortality records. Lancet Reg Heal. 2022;22:100489. doi:10.1016/J.LANEPE.2022.100489
 
