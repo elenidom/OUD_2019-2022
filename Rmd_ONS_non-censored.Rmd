@@ -31,13 +31,6 @@ test <- data.table(test) # convert into data.table
 
 test <- test[is.na(cause) | cause != "U50.9"]  # exclude the code U50.9 that indicates an open verdict
 
-# filter patients who changed medication within the same episode and those with registration < 6 months at index
-# test <- test %>% filter(switcher_epi == 0 & prereg >= 6)
-
-# cohort size
-#test %>% summarise(Np = n_distinct(patid)) 
-
-
 # [AIM 1]
 # 
 # Create a new dataframe that keeps only the vars of need. One patient per record:
@@ -116,9 +109,8 @@ kable(death_rate, caption = "Annual CMR per 100 person-years of follow-up (1998-
 # AIM: DRDs/All-cause mortality annually - counts and standardised death rates
 
 library(ggplot2)
-                       #       ---------------------------------------------------
-database <- "Combined" # <--- | USER INPUT to populate plots with correct titles  |
-                       #       ---------------------------------------------------
+
+database <- "Combined" 
 
 # Number of deaths annually
 colors <- c("All-cause" = "purple", "DRDs" = "red")
@@ -223,13 +215,6 @@ all_cause_summary <- all_cause %>%
   arrange(-N)
 
 kable(all_cause_summary, caption = "Summary of death causes")
-
-
-# Separate the other category to classify these causes of deaths
-# other_cause <- all_cause 
-# other_cause <- data.table(other_cause)
-# other_cause <- other_cause[death_cat == "Other *** ", .(patid, cause)]
-# other_cause <- other_cause %>% distinct()
 
 # The person-years of follow-up is a variable in the ggplot and we want to parametrise it
 # instead of typing numbers when we switch between databases (G/A):
