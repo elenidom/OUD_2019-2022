@@ -1,0 +1,308 @@
+---
+title: "ONS desc stats non-censored"
+author: "Eleni Domzaridou"
+date: "16/06/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# load libraries
+library(dplyr)
+library(lubridate)
+library(ggplot2)
+library(knitr) # for ktable function to produce tables with captions
+library(data.table)
+
+# Load environment with combined dataset
+load("/mnt/bmh01-rds/Ashcroft_Domzaridou_PSTRC/mbmhted6/Eleni_Combined_DBs/combined.RData")
+
+```
+
+
+
+```{r echo = FALSE, message=FALSE}
+
+# assign the master cohort to a new dataframe
+test <- my_patients_com %>% arrange(patid, myeventdate, OST_episode) %>% filter(prereg >= 6)  # combined dataset
+ 
+test <- data.table(test) # convert into data.table
+
+test <- test[is.na(cause) | cause != "U50.9"]  # exclude the code U50.9 that indicates an open verdict
+
+# filter patients who changed medication within the same episode and those with registration < 6 months at index
+# test <- test %>% filter(switcher_epi == 0 & prereg >= 6)
+
+# cohort size
+#test %>% summarise(Np = n_distinct(patid)) 
+
+
+# [AIM 1]
+# 
+# Create a new dataframe that keeps only the vars of need. One patient per record:
+
+# for uncensored patients
+mortality_rate.df <- test %>% 
+  select(c(patid, poisoning, poisoning_flag, mydod, index_year, exit_date, dead)) %>%
+  distinct() %>%
+  mutate(death_year = year(exit_date)) 
+
+# a dataframe to count number of deaths
+annual_poi <- mortality_rate.df %>%
+  group_by(death_year) %>%
+  summarise(Np = sum(poisoning_flag == 1), # DRDs
+            Na = sum(dead == 1)) # All-cause mortality
+
+annual_poi <- annual_poi[1:20,]
+colnames(annual_poi)[1] <- "year" # rename var (primary key) to enable merging with the following dataframe
+
+
+# A dataframe to count number of person-years of follow-up per year
+annual_PY <- test %>% 
+  select(c(patid, OST_temp_daysin, OST_gap2, presc_exit_days, myeventdate, daysin, daysout)) %>% 
+  group_by(patid, year(myeventdate)) %>%
+  mutate(
+    daysout_annual = sum(OST_gap2)) %>% ungroup() %>%
+  group_by(patid) %>%
+  mutate(
+    daysout_annual = if_else(year(myeventdate) == max(year(myeventdate)), daysout_annual + presc_exit_days, daysout_annual) ,
+    pyear = year(myeventdate)
+  ) %>% 
+  ungroup() 
+  
+annual_PY <- annual_PY %>%
+  group_by(patid, pyear) %>%
+  mutate(
+    daysin_annual = sum(OST_temp_daysin),
+    PY_annual = (daysin_annual + daysout_annual)/365.25,
+    pyear = year(myeventdate)
+  ) %>% ungroup()
+
+# Pool the results by calendar year
+annual_PY <- annual_PY %>%  
+  select(c(patid, pyear, PY_annual, daysin_annual, daysout_annual)) %>%
+  distinct() %>%
+  group_by(pyear) %>%
+  summarise(PY = sum(PY_annual),
+            PY_in = sum(daysin_annual)/365.25,
+            PY_out = sum(daysout_annual)/365.25)
+  
+colnames(annual_PY)[1] <- "year"
+#head(annual_PY)
+
+# double check:
+# test %>%
+#   select(c("patid", "daysin", "daysout")) %>%
+#   distinct() %>%
+#   summarise(pyfu_in  = sum(daysin)/365.25,
+#             pyfu_out = sum(daysout)/365.25)
+
+
+
+# The result of merging the above two dataframes is the merged dataframe 'death_rate'.
+# We subtract the number of deaths that occurred within a year, from the population at the same year.
+death_rate <- left_join(annual_poi, annual_PY, by = "year")
+
+death_rate <- death_rate %>% 
+  mutate(CMR_p_100 = Np / PY * 100, # CMR of drug-poisoning deaths
+         CMR_a_100 = Na / PY * 100) # CMR of all-cause mortality
+kable(death_rate, caption = "Annual CMR per 100 person-years of follow-up (1998-2017)")
+
+# ..................................
+# Visualise with ggplot 
+# ..................................
+
+# AIM: DRDs/All-cause mortality annually - counts and standardised death rates
+
+library(ggplot2)
+                       #       ---------------------------------------------------
+database <- "Combined" # <--- | USER INPUT to populate plots with correct titles  |
+                       #       ---------------------------------------------------
+
+# Number of deaths annually
+colors <- c("All-cause" = "purple", "DRDs" = "red")
+
+death_rate %>% 
+  ggplot()+
+  geom_line(aes(year, Np, color = "DRDs")) +        # DRDs
+  geom_line(aes(year, Na, color = "All-cause")) +   # All-cause mortality (including DRDs)
+  labs(title = paste0("Number of annual drug-poisoning deaths - CPRD ", database, "/ONS"),
+       x = "Year",
+       y = "Number of deaths",
+       color = "Mortality") +
+  scale_color_manual(values = colors)
+
+# CMR
+death_rate %>% 
+  ggplot(aes(x = year))+
+  geom_line(aes(y = CMR_p_100), color = "red") + # geom_point(color = "orange", size = 2) +
+  geom_line(aes(y = CMR_a_100), color = "purple") +
+  labs(title = paste0("Drug-poisoning death rate per 100 patients - CPRD ", database, "/ONS"),
+       x = "Year",
+       y = "CMR/100 patients")
+
+# ..........................
+# end of ggplot
+# ..........................
+
+
+# [AIM 2]
+# Describe the number of DRDs and all-cause mortality, according to ICD-10 codes
+
+# DRDs mortality summary
+DRDs <- test %>% 
+  distinct() %>%
+  group_by(poisoning_flag) %>% 
+  summarise(N_deaths = n_distinct(patid))
+
+kable(DRDs, caption = "Drug-poisoning deaths and all-cause mortality one year since the last expired OST prescription")
+
+# count the number of DRDs according to specific ICD-10 codes
+DRDs_all <- test %>%
+  filter(poisoning_flag == 1) %>%
+  distinct() %>% 
+  group_by(poisoning) %>% 
+  summarise(N_deaths = n_distinct(patid)) 
+
+kable(DRDs_all, caption = "ICD-9/10 codes for all drug-poisoning deaths") 
+
+
+# All-cause mortality
+all_cause <- test %>% filter(dead == 1) # patients who died until 2017-12-31;
+# we do not use the var 'mydod' here as this includes deaths that occurred after the end 
+# of 2017 and might be a matter of corroners' inquest
+
+# Other causes of death
+all_cause_text <- all_cause %>% 
+  select(c(cause, patid)) %>% 
+  distinct() %>% 
+  group_by(cause) %>% 
+  summarise(Np = n_distinct(patid))
+
+#write.csv(all_cause_text, "All_cause_mortality.csv")
+
+all_cause <- all_cause %>% 
+  mutate(
+    death_cat = case_when(
+      grepl("A|B", cause) ~ "Infectious/parasitic diseases",
+      grepl("C|D|144.9|154.1|162.9|170.6|174.9|180.9|183|189", cause) ~ "Cancers",
+      grepl("E", cause) ~ "Endocrine system",
+      grepl("F|304|983", cause) ~ "Mental and behavioural disorders * ",
+      grepl("G", cause) ~ "Nervous system disorders",
+      grepl("I|415.1|516.3", cause) ~ "Circulatory system",
+      grepl("J", cause) ~ "Respiratory system",
+      grepl("K", cause) ~ "Digestive system",
+      grepl("L", cause) ~ "Skin and subcutaneous tissue",
+      grepl("M", cause) ~ "Musculoskeletal system and connective tissue",
+      grepl("N", cause) ~ "Disease of the genitourinary system",
+      grepl("O", cause) ~ "Pregnancy, childbirth and the puerperium",
+      grepl("Q", cause) ~ "Other congenital malformations",
+      grepl("R99", cause) ~ "Other ill-defined and unspecified cause of mortality",
+      grepl("R97", cause) ~ "Uknown cause of death",
+      grepl("V|W|X|Y", cause) ~ "External causes * ",
+      grepl("819|850|953|988.8", cause) ~ "Injuries",
+      TRUE ~ "Other *** "
+    )
+  )
+
+# vector that contains DR-poisoning codes according to ONS definition (that we have agreed to apply to NFO)
+poisoning.vector <- "X40|X41|X42|X43|X44|F11|F12|F13|F14|F15|F16|F18|F19|Y10|Y11|Y12|Y13|Y14|X60|X61|X62|X63|X64|E980.0|E980.1|E980.2|E980.3|E980.4|E980.5|E950.0|E950.1|E950.2|E950.3|E950.4|E950.5|E850|E851|E852|E853|E854|E855|E856|E857|E858|292|304|305.2|305.3|305.4|305.5|305.6|305.7|305.8|305.9|E962.0"
+
+all_cause <- all_cause %>%
+  mutate(
+    death_cat = if_else(grepl(poisoning.vector, cause), "Drug-poisoning", death_cat)
+  )
+
+# Summarise causes and number of deaths
+all_cause_summary <- all_cause %>% 
+  select(c(patid, death_cat)) %>% 
+  distinct() %>%
+  group_by(death_cat) %>% 
+  summarise(N = n_distinct(patid)) %>% 
+  arrange(-N)
+
+kable(all_cause_summary, caption = "Summary of death causes")
+
+
+# Separate the other category to classify these causes of deaths
+# other_cause <- all_cause 
+# other_cause <- data.table(other_cause)
+# other_cause <- other_cause[death_cat == "Other *** ", .(patid, cause)]
+# other_cause <- other_cause %>% distinct()
+
+# The person-years of follow-up is a variable in the ggplot and we want to parametrise it
+# instead of typing numbers when we switch between databases (G/A):
+PYFU <- test %>%
+  select(c("patid", "daysin", "daysout", "myage_cat", "age_at_death_cat")) %>%
+  group_by(age_at_death_cat) %>%
+  distinct() %>%
+  summarise(pyfu_in  = sum(daysin)/365.25,
+            pyfu_out = sum(daysout)/365.25,
+            pyfu_in_out = sum(pyfu_in + pyfu_out)) # we will keep only this value that gives PY in+out
+
+
+all_cause_agecat <- all_cause %>%
+  select(c(patid, death_cat, age_at_death_cat, age_at_death)) %>%
+  distinct() %>%
+  group_by(death_cat, age_at_death_cat) %>%
+  select(-patid) %>%
+  summarise(N_deaths = n()) # because this data includes only patients who died
+
+all_cause_agecat <- left_join(all_cause_agecat, PYFU, by = "age_at_death_cat")
+
+all_cause_agecat <- all_cause_agecat %>%
+  group_by(death_cat, age_at_death_cat) %>%
+  mutate(
+    CMR_100 = round(N_deaths / pyfu_in_out * 100, 2)
+  )
+#all_cause_agecat[, c(1:3, 6:7)]
+
+# ..............................
+#     Visualise with ggplot
+# ..............................
+
+require(ggplot2)
+
+all_cause_agecat %>%  
+  ggplot(aes(x = death_cat, y = CMR_100, fill = age_at_death_cat)) +
+  geom_bar(stat = 'identity') + # position = position_dodge(preserve = 'single')) + # unstacked barplot
+  labs(fill = "Age at date of death",
+       title = "20-year mortality",
+       x = "Underlying cause of death",
+       y = "CMR per 100 person-years") +
+  theme_bw() +
+  coord_flip()
+
+kable(all_cause_agecat, caption = "CMR per 100 person-years and age category at death date")
+
+# ..............................
+#     End of visualisation
+# ..............................
+
+
+# ..................................
+# Visualise with ggplot 
+# ..................................
+
+# Difference between expected completion of last issued prescription
+# and exit date
+
+require(ggplot2)
+
+test %>%
+  ggplot(aes(x = presc_exit_days)) +
+  geom_histogram(color = "purple", fill = "white", binwidth = 100) +
+  labs(title = "Difference between expected completion of last issued prescription and death date",
+       x = "Days",
+       y = "Frequency") 
+
+# ..............................
+#     End of visualisation
+# ..............................
+
+rm(all_cause, annual_poi, annual_PY, death_rate, mortality_rate.df, colors, database,
+   poisoning.vector, PYFU, test, all_cause_text, all_cause_agecat, DRDs, DRDs_all)
+
+```
+
